@@ -1,4 +1,8 @@
 import logging
+import traceback  # Ensure this import is present at the top
+import time  # Ensure this import is present at the top
+from datetime import datetime, timezone
+
 from starlette.routing import Match  
 from api.routes.platform import get_clerk_user
 from fastapi import Request, HTTPException
@@ -10,9 +14,9 @@ from cachetools import TTLCache
 from typing import Dict
 from fnmatch import fnmatch
 import logfire
-import time  # Ensure this import is present at the top
 from api.router import app
-import traceback  # Ensure this import is present at the top
+from sqlalchemy import select
+from api.models import User
 
 logger = logging.getLogger(__name__)
 

@@ -12,6 +12,13 @@ load_dotenv()
 # Use environment variables for database connection
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Ensure we use an async driver
+if DATABASE_URL and not DATABASE_URL.startswith("postgresql+asyncpg://"):
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 # Fix for asyncpg not supporting sslmode/channel_binding in URL
 connect_args = {}
 if DATABASE_URL and ("sslmode" in DATABASE_URL or "channel_binding" in DATABASE_URL):
