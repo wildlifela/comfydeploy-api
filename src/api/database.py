@@ -1,4 +1,5 @@
 import os
+import re
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -11,20 +12,23 @@ load_dotenv()
 # Use environment variables for database connection
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Ensure the URL uses the asyncpg dialect
-if DATABASE_URL and not DATABASE_URL.startswith("postgresql+asyncpg://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-
-# Fix for asyncpg not supporting sslmode in URL
+# Fix for asyncpg not supporting sslmode/channel_binding in URL
 connect_args = {}
-if "sslmode" in DATABASE_URL:
-    # Remove sslmode from URL
-    import re
+if DATABASE_URL and ("sslmode" in DATABASE_URL or "channel_binding" in DATABASE_URL):
+    # Remove unsupported query params
     DATABASE_URL = re.sub(r"(?:\?|&)sslmode=[^&]+", "", DATABASE_URL)
-    # Be robust about query param separators
-    if "?" not in DATABASE_URL and "&" in DATABASE_URL:
+    DATABASE_URL = re.sub(r"(?:\?|&)channel_binding=[^&]+", "", DATABASE_URL)
+    
+    # Clean up potentially malformed URL query part
+    if "?" in DATABASE_URL:
+        base, query = DATABASE_URL.split("?", 1)
+        if not query:
+            DATABASE_URL = base
+        elif query.startswith("&"):
+            DATABASE_URL = base + "?" + query[1:]
+    elif "&" in DATABASE_URL: # Case where ? was removed but & remains
         DATABASE_URL = DATABASE_URL.replace("&", "?", 1)
-        
+
     # Pass ssl context enabling validation
     # For Neon/Railway, simplistic "require" often maps to:
     connect_args["ssl"] = "require"
