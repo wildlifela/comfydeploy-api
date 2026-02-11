@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import traceback
 from api.routes.platform import get_customer_plan_cached
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -27,8 +29,26 @@ class SubscriptionMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=exc.status_code, content={"detail": exc.detail}
             )
+        except Exception as exc:
+            # Fail-open: if Redis/Autumn is unreachable, log error but allow request
+            logger.error(f"SubscriptionMiddleware error: {str(exc)}")
+            # Optional: set default plan if checks fail
+            if request.state and hasattr(request.state, "current_user") and request.state.current_user:
+                 if os.getenv("SELF_HOSTED_MODE") == "true":
+                     request.state.current_user["plan"] = "enterprise"
+                 else:
+                     request.state.current_user["plan"] = "free"
+            
+            response = await call_next(request)
+            return response
 
     async def check_subscription_access(self, request: Request):
+        # Self-hosted mode: set enterprise tier directly, skip Autumn/Stripe
+        if os.getenv("SELF_HOSTED_MODE") == "true":
+            if request.state is not None and request.state.current_user is not None:
+                request.state.current_user["plan"] = "enterprise"
+            return
+
         # Check if request.state exists and has current_user attribute
         if (
             not hasattr(request.state, "current_user")

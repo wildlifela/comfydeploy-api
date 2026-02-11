@@ -780,6 +780,31 @@ async def get_plans(
     # Fetch subscription status directly from the database
 
     # Check if Autumn is enabled
+    if os.getenv("SELF_HOSTED_MODE") == "true":
+        return {
+            "plans": ["enterprise"],
+            "features": {
+                "max_workflow_runs": -1,
+                "max_machines": -1,
+                "max_credits": -1, 
+                "max_gpu_hours": -1,
+                "can_use_gpu": True,
+                "can_use_api": True,
+                "can_view_logs": True
+            },
+            "subscription": {
+                "status": "active",
+                "current_period_end": 4102444800,  # Far future (2100)
+                "cancel_at_period_end": False
+            },
+            "usage": {
+                "workflow_runs": 0,
+                "machines": 0,
+                "credits": 0,
+                "gpu_hours": 0
+            }
+        }
+
     if AUTUMN_API_KEY:
         try:
             # Get the transformed data from cache or fetch and transform from Autumn
