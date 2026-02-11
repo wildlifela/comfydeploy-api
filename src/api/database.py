@@ -15,11 +15,26 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL and not DATABASE_URL.startswith("postgresql+asyncpg://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 
+# Fix for asyncpg not supporting sslmode in URL
+connect_args = {}
+if "sslmode" in DATABASE_URL:
+    # Remove sslmode from URL
+    import re
+    DATABASE_URL = re.sub(r"(?:\?|&)sslmode=[^&]+", "", DATABASE_URL)
+    # Be robust about query param separators
+    if "?" not in DATABASE_URL and "&" in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("&", "?", 1)
+        
+    # Pass ssl context enabling validation
+    # For Neon/Railway, simplistic "require" often maps to:
+    connect_args["ssl"] = "require"
+
 MAX_EXPECTED_CONCURRENCY = 200  # Document your design target
 
 # Configure engine with larger pool size and longer timeout
 engine = create_async_engine(
     DATABASE_URL,
+    connect_args=connect_args,
     poolclass=AsyncAdaptedQueuePool,
     # Neon recommended settings for serverless
     pool_size=25,  # Reduced from 100 - better for 2 workers on 4 CPUs
