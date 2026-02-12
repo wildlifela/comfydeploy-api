@@ -130,8 +130,11 @@ api_router.include_router(auth_response.router)
 api_router.include_router(clerk_webhook.router)
 api_router.include_router(autumn_webhook.router)
 
-# Mount Autumn ASGI app at /api/autumn
-app.mount("/api/autumn", autumn_app)
+# Mount Autumn ASGI app at /api/autumn (only if not in self-hosted mode)
+if os.getenv("SELF_HOSTED_MODE") != "true":
+    app.mount("/api/autumn", autumn_app)
+else:
+    logger.info("Self-hosted mode enabled - skipping Autumn ASGI mount")
 
 # This is for the docs generation
 public_api_router.include_router(run.router)
