@@ -57,6 +57,26 @@ router = APIRouter(
 AUTUMN_API_KEY = os.getenv("AUTUMN_SECRET_KEY")
 AUTUMN_API_URL = "https://api.useautumn.com/v1"
 
+# Self-hosted mode helpers
+def is_self_hosted() -> bool:
+    """Check if running in self-hosted mode (no Autumn/Clerk)"""
+    return os.getenv("SELF_HOSTED_MODE") == "true"
+
+def get_self_hosted_autumn_data() -> dict:
+    """Return mock Autumn data for self-hosted mode with unlimited access"""
+    return {
+        "customer_id": "self-hosted",
+        "features": {
+            "gpu-credit": {
+                "limit": None,  # Unlimited
+                "usage": 0,
+                "credit_schema": []
+            }
+        },
+        "plan": "enterprise",
+        "invoices": []
+    }
+
 @router.get("/platform/user-settings")
 async def get_user_settings(
     request: Request,
@@ -69,6 +89,18 @@ async def get_user_settings(
 async def get_autumn_data_endpoint(
     request: Request,
 ):
+    # In self-hosted mode, return mock data with unlimited credits
+    if is_self_hosted():
+        return {
+            "credit_schema": {},
+            "transformed_list": [],
+            "autumn_data": get_self_hosted_autumn_data(),
+            "plan": "enterprise",
+            "spending_limit": None,
+            "max_spending_limit": None,
+            "invoice_data": None
+        }
+    
     # print(request.state.current_user)
     user_id = request.state.current_user.get("user_id")
     org_id = request.state.current_user.get("org_id")
@@ -155,6 +187,14 @@ async def check_feature_limit(
     
     if not customer_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Self-hosted mode: always allow unlimited access
+    if is_self_hosted():
+        return {
+            "allowed": True,
+            "feature_id": feature_id,
+            "message": "Unlimited access in self-hosted mode"
+        }
     
     try:
         # Check feature access using autumn client
