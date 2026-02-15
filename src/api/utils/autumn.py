@@ -21,21 +21,10 @@ class AutumnClient:
         self.api_key = api_key or os.getenv("AUTUMN_SECRET_KEY")
         self.base_url = "https://api.useautumn.com/v1"
         
-    def _get_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-        """Get default headers for API requests."""
-        if not self.api_key:
-            raise ValueError("AUTUMN_SECRET_KEY not found in environment variables")
-            
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        
-        if extra_headers:
-            headers.update(extra_headers)
-            
-        return headers
-    
+    def _get_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
+        """Get default headers for API requests. Always returns None (billing bypassed)."""
+        return None
+
     async def _make_request(
         self,
         method: str,
@@ -43,10 +32,16 @@ class AutumnClient:
         data: Optional[Dict[str, Any]] = None,
         extra_headers: Optional[Dict[str, str]] = None
     ) -> Optional[Dict[str, Any]]:
-        """Make a request to the Autumn API."""
+        """Make a request to the Autumn API. Always returns None (billing bypassed)."""
+        return None
+
+        # --- Original code below, kept for reference ---
         url = f"{self.base_url}/{endpoint}"
         headers = self._get_headers(extra_headers)
-        
+
+        if headers is None:
+            return None
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.request(

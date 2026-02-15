@@ -488,10 +488,6 @@ async def create_machine_version(
 def hash_machine_dependencies(docker_commands: DockerCommandResponse):
     return hashlib.sha256(json.dumps(docker_commands.model_dump()).encode()).hexdigest()
 
-from autumn import Autumn
-
-autumn = Autumn(token=os.getenv("AUTUMN_SECRET_KEY"))
-
 async def validate_free_plan_restrictions(
     request: Request,
     machine_data: dict,
@@ -501,60 +497,9 @@ async def validate_free_plan_restrictions(
 ) -> None:
     """
     Validates restrictions for free plan users.
-    Raises HTTPException if restrictions are violated.
+    Billing is fully bypassed — all restrictions are skipped.
     """
-    current_user = request.state.current_user
-    customer_id = current_user.get("org_id", None) or current_user.get("user_id", None)
-    
-    check_result = await autumn.customers.get(customer_id)
-    
-    max_gpu = 1
-    max_always_on = 0
-    for [id,feature] in check_result.features.items():
-        if id == "gpu_concurrency_limit":
-            max_gpu = feature.included_usage
-            continue
-        if id == "max_always_on_machine":
-            max_always_on = feature.included_usage
-            continue
-    
-    # print(max_gpu)
-    concurrency_limit = machine_data.get("concurrency_limit", None)
-    if (concurrency_limit is not None and concurrency_limit > max_gpu):
-        raise HTTPException(
-            status_code=403,
-            detail="You have reached your concurrency limit. Please upgrade to use this feature.",
-        )
-        
-    keep_warm = machine_data.get("keep_warm", None)
-    if (keep_warm is not None and keep_warm > max_always_on):
-        raise HTTPException(
-            status_code=403,
-            detail="You have reached your always on machine limit. Please upgrade to use this feature.",
-        )
-    
-    plan = request.state.current_user.get("plan")
-    if plan != "free":
-        return
-
-    # Defer machine limit enforcement to Autumn checks during creation
-    # (see autumn_client.check in create_serverless_machine)
-
-    # Check restricted fields
-    restricted_fields = [
-        "extra_docker_commands",
-        "base_docker_image",
-        "prestart_command",
-        "extra_args",
-        "install_custom_node_with_gpu",
-    ]
-
-    for field in restricted_fields:
-        if field in machine_data and machine_data[field]:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Free plan users cannot use {field}. Please upgrade to use this feature.",
-            )
+    return
 
     # Check docker_command_steps - only allow ComfyUI Deploy node
     

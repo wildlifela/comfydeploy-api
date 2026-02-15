@@ -193,6 +193,15 @@ else:
         ]
     )
 
+# Add FRONTEND_URL to CORS origins for self-hosted deployments
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    frontend_url = frontend_url.rstrip("/")
+    if not frontend_url.startswith("http"):
+        frontend_url = f"https://{frontend_url}"
+    if frontend_url not in allow_origins:
+        allow_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,  # Allow all subdomains of comfydeploy.com

@@ -69,66 +69,11 @@ async def get_user_settings(
 async def get_autumn_data_endpoint(
     request: Request,
 ):
-    # print(request.state.current_user)
-    user_id = request.state.current_user.get("user_id")
-    org_id = request.state.current_user.get("org_id")
-    
-    autumn_data = await get_autumn_customer(org_id or user_id, include_features=True)
-    autumn_query = await get_autumn_data(org_id or user_id)
-    
-    # Get the credit schema from customer's features
-    credit_schema = {}
-    if autumn_data and autumn_data.get("features") and autumn_data["features"].get("gpu-credit"):
-        gpu_credit_feature = autumn_data["features"]["gpu-credit"]
-        if gpu_credit_feature.get("credit_schema"):
-            for credit_item in gpu_credit_feature["credit_schema"]:
-                feature_id = credit_item.get("feature_id") or credit_item.get("metered_feature_id")
-                credit_amount = credit_item.get("credit_amount") or credit_item.get("credit_cost")
-                if feature_id and credit_amount:
-                    credit_schema[feature_id] = credit_amount
-    
-    # Transform the usage list using the credit schema
-    transformed_list = []
-    usage_list = autumn_query.get("list", []) if autumn_query else []
-    
-    # First pass: identify GPU types that have zero usage across all periods
-    gpu_totals = {}
-    for usage_item in usage_list:
-        for gpu_type, usage_value in usage_item.items():
-            if gpu_type == "period":
-                continue
-            if gpu_type not in gpu_totals:
-                gpu_totals[gpu_type] = 0
-            gpu_totals[gpu_type] += usage_value if usage_value else 0
-    
-    # Identify GPU types that are all zero and filter them out
-    zero_gpu_types = [gpu_type for gpu_type, total in gpu_totals.items() if total == 0]
-    gpu_types_to_filter = zero_gpu_types  # Filter out all zero GPU types
-    
-    # Second pass: transform and filter the data
-    for usage_item in usage_list:
-        transformed_item = {"period": usage_item.get("period")}
-        
-        # Transform each GPU usage value using the credit multiplier
-        for gpu_type, usage_value in usage_item.items():
-            if gpu_type == "period":
-                continue
-            
-            # Skip GPU types that we're filtering out
-            if gpu_type in gpu_types_to_filter:
-                continue
-                
-            # Map the usage value using credit schema if available
-            credit_multiplier = credit_schema.get(gpu_type, 1.0)
-            transformed_value = usage_value * credit_multiplier if usage_value else 0
-            transformed_item[gpu_type] = transformed_value
-            
-        transformed_list.append(transformed_item)
-    
+    from api.utils.self_hosted_mocks import MOCK_CUSTOMER
     return {
-        "autumn_data": autumn_data,
-        "list": transformed_list,
-        "credit_schema": credit_schema,  # Include for debugging/reference
+        "autumn_data": MOCK_CUSTOMER,
+        "list": [],
+        "credit_schema": {},
     }
 
 
@@ -138,52 +83,8 @@ async def check_feature_limit(
     feature_id: str,
     required_balance: int = 1,
 ) -> Dict[str, Any]:
-    """
-    Check if a customer has access to a feature based on their limits.
-    
-    Args:
-        feature_id: The feature ID to check (e.g., 'workflow_limit', 'machine_limit')
-        required_balance: The amount of feature required (default: 1)
-        
-    Returns:
-        Check response with allowed status and limit information
-    """
-    from api.utils.autumn import autumn_client
-    
-    current_user = request.state.current_user
-    customer_id = current_user.get("org_id") or current_user.get("user_id")
-    
-    if not customer_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    try:
-        # Check feature access using autumn client
-        check_result = await autumn_client.check(
-            customer_id=customer_id,
-            feature_id=feature_id,
-            required_balance=required_balance,
-            with_preview=True  # Include preview data for paywall/upgrade UI
-        )
-        
-        if not check_result:
-            # If no result, assume not allowed
-            return {
-                "allowed": False,
-                "feature_id": feature_id,
-                "message": f"Unable to verify {feature_id} access"
-            }
-        
-        return check_result
-        
-    except Exception as e:
-        logfire.error(f"Error checking feature limit: {str(e)}")
-        # Don't fail hard, return a conservative response
-        return {
-            "allowed": False,
-            "feature_id": feature_id,
-            "message": f"Error checking {feature_id} limit",
-            "error": str(e)
-        }
+    """Always allowed — billing is fully bypassed."""
+    return {"allowed": True, "feature_id": feature_id, "unlimited": True}
 
 
 @router.get("/user/{user_id}")
@@ -774,69 +675,10 @@ async def get_plans(
     user_id: str,
     org_id: str,
 ) -> Dict[str, Any]:
-    """Get plans information including current subscription details"""
-
-    # Get current plan data first so we can use it for fallback
-    # Fetch subscription status directly from the database
-
-    # Check if Autumn is enabled
-    if AUTUMN_API_KEY:
-        try:
-            # Get the transformed data from cache or fetch and transform from Autumn
-            transformed_data = await get_customer_plan_cached_5_seconds(org_id or user_id) #get_customer_plan(request, background_tasks)
-            if transformed_data:
-                logfire.info(
-                    f"Successfully fetched transformed data for customer {org_id or user_id}"
-                )
-                
-                # If last_invoice_timestamp is None, try to get it from subscription
-                if transformed_data.get("last_invoice_timestamp") is None:
-                    subscription_query = (
-                        select(SubscriptionStatus)
-                        .where(
-                            and_(
-                                SubscriptionStatus.status != "deleted",
-                                or_(
-                                    and_(
-                                        SubscriptionStatus.org_id.is_(None),
-                                        SubscriptionStatus.user_id == user_id,
-                                    )
-                                    if not org_id
-                                    else SubscriptionStatus.org_id == org_id
-                                ),
-                            )
-                        )
-                        .order_by(SubscriptionStatus.created_at.desc())
-                        .limit(1)
-                    )
-                    result = await db.execute(subscription_query)
-                    subscription = result.scalar_one_or_none()
-                    
-                    if subscription and subscription.last_invoice_timestamp:
-                        transformed_data["last_invoice_timestamp"] = int(
-                            subscription.last_invoice_timestamp.timestamp()
-                        )
-                
-                # Return the transformed data directly
-                return transformed_data
-                
-        except Exception as e:
-            logfire.error(f"Error calling Autumn API: {str(e)}")
-
-    # Check if Stripe is disabled
-    if os.getenv("DISABLE_STRIPE") == "true":
-        return {
-            "plans": ["creator"],
-            "names": ["creator"],
-            "prices": [os.getenv("STRIPE_PR_BUSINESS")],
-            "amount": [100],
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-        }
-
+    """Always returns enterprise plan — billing is fully bypassed."""
     return {
-        "plans": [],
-        "names": [],
+        "plans": ["self_hosted_enterprise"],
+        "names": ["Self Hosted Enterprise"],
         "prices": [],
         "amount": [],
         "charges": [],
@@ -844,6 +686,7 @@ async def get_plans(
         "canceled_at": None,
         "payment_issue": False,
         "payment_issue_reason": "",
+        "source": "self_hosted",
     }
 
 
@@ -867,6 +710,9 @@ PLAN_FEATURE_MAPPING = {
     "business_yearly": "business",
     "deployment_monthly": "business",  # deployment plans have same limits as business
     "deployment_yearly": "business",
+
+    # Self-hosted
+    "self_hosted_enterprise": "enterprise",
 }
 
 def get_feature_set_for_plan(plan_key: str) -> str:
@@ -927,7 +773,10 @@ async def get_api_plan(
     # Calculate limits based on plan
     # Get the highest tier feature set from all active plans
     feature_sets = [get_feature_set_for_plan(p) for p in plans.get("plans", [])]
-    if "business" in feature_sets:
+    if "enterprise" in feature_sets:
+        machine_max_count = DEFAULT_FEATURE_LIMITS["enterprise"]["machine"]
+        workflow_max_count = DEFAULT_FEATURE_LIMITS["enterprise"]["workflow"]
+    elif "business" in feature_sets:
         machine_max_count = DEFAULT_FEATURE_LIMITS["business"]["machine"]
         workflow_max_count = DEFAULT_FEATURE_LIMITS["business"]["workflow"]
     elif "creator" in feature_sets:
@@ -1174,63 +1023,8 @@ async def stripe_checkout(
     coupon: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle Stripe checkout process"""
-    user_id = request.state.current_user.get("user_id")
-    org_id = request.state.current_user.get("org_id")
-    
-    if plan in ["creator", "business", "deployment"]:
-        plan = f"{plan}_monthly"
-        
-    if not user_id:
-        return {"url": redirect_url or "/"}
-    if not plan:
-        return {"url": redirect_url or "/pricing"}
-
-    # Get user data from Clerk
-    user_data = await get_clerk_user(user_id)
-    user_email = next(
-        (
-            email["email_address"]
-            for email in user_data["email_addresses"]
-            if email["id"] == user_data["primary_email_address_id"]
-        ),
-        None,
-    )
-    
-    try:
-        print(f"Attaching customer {user_id} to Autumn")
-        
-        customer_id = org_id if org_id else user_id
-        response_data = await autumn_client.attach(
-            customer_id=customer_id,
-            product_id=plan,  # Using the plan as product_id
-            force_checkout=not upgrade,
-            success_url=redirect_url,
-            customer_data={
-                "name": (user_data.get("first_name") or "") + " " + (user_data.get("last_name") or ""),
-                "email": user_email,
-            }
-        )
-        
-        if response_data:
-            logfire.info(f"Successfully attached customer {user_id} to Autumn")
-            print(response_data)
-            if response_data.get("checkout_url"):
-                return {"url": response_data.get("checkout_url")}
-            else:
-                return response_data
-        else:
-            # The autumn client logs errors internally and returns None on failure
-            # Check if the customer already has the product by trying to get billing portal
-            logfire.info(f"Attach failed. Attempting to get billing portal URL.")
-            
-            portal_data = await autumn_client.get_billing_portal(customer_id)
-            if portal_data and portal_data.get("url"):
-                return {"url": portal_data["url"]}
-            
-            return {"error": "Failed to create subscription"}
-    except Exception as e:
-        logfire.error(f"Error calling Autumn API: {str(e)}")
+    """Billing bypassed — redirect back."""
+    return {"url": redirect_url or "/"}
             
 
 def r(price: float) -> float:
@@ -1261,28 +1055,8 @@ async def gpu_pricing():
 
 @router.get("/platform/gpu-credit-schema")
 async def get_gpu_credit_schema():
-    """Return the GPU credit schema for gpu-credit and gpu-credit-topup features"""
-    try:
-        features_data = await autumn_client.get_features()
-        
-        if not features_data or "list" not in features_data:
-            raise HTTPException(status_code=500, detail="Failed to fetch features from Autumn")
-        
-        credit_schemas = {}
-        
-        for feature in features_data["list"]:
-            if feature["id"] in ["gpu-credit", "gpu-credit-topup"] and feature["type"] == "credit_system":
-                credit_schemas[feature["id"]] = {
-                    "name": feature["name"],
-                    "display": feature["display"],
-                    "schema": feature.get("credit_schema", [])
-                }
-        
-        return credit_schemas
-        
-    except Exception as e:
-        logfire.error(f"Error fetching GPU credit schema: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch GPU credit schema: {str(e)}")
+    """Billing bypassed — returns empty schema."""
+    return {}
 
 @router.get("/platform/usage-details")
 async def get_usage_details_by_day(
@@ -1593,20 +1367,8 @@ async def get_dashboard_url(
     redirect_url: str = None,
     db: AsyncSession = Depends(get_db),
 ):
-    user_id = request.state.current_user.get("user_id")
-    org_id = request.state.current_user.get("org_id")
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    customer_id = org_id or user_id
-    portal_data = await autumn_client.get_billing_portal(customer_id)
-    
-    if portal_data and portal_data.get("url"):
-        return {"url": portal_data["url"]}
-    
-    logfire.error(f"Failed to get billing portal URL for customer {customer_id}")
-    raise HTTPException(status_code=500, detail="Failed to get billing portal URL")
+    """Billing bypassed — no dashboard available."""
+    raise HTTPException(status_code=404, detail="Billing not configured")
 
 
 class TopUpRequest(BaseModel):
@@ -1619,83 +1381,8 @@ async def topup_credits(
     request: Request,
     body: TopUpRequest,
 ):
-    """
-    Create a checkout session for topping up GPU credits.
-    $1 = 100 credits
-    """
-    user_id = request.state.current_user.get("user_id")
-    org_id = request.state.current_user.get("org_id")
-    
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    # Validate amount
-    if body.amount < 10:
-        raise HTTPException(status_code=400, detail="Minimum top-up amount is $10")
-    
-    if body.amount > 1000:
-        raise HTTPException(status_code=400, detail="Maximum top-up amount is $1000")
-    
-    customer_id = org_id or user_id
-    
-    try:
-        # Get user data from Clerk for checkout
-        user_data = await get_clerk_user(user_id)
-        user_email = next(
-            (
-                email["email_address"]
-                for email in user_data["email_addresses"]
-                if email["id"] == user_data["primary_email_address_id"]
-            ),
-            None,
-        )
-        
-        # Convert dollars to credit quantity ($1 = 100 credits)
-        credit_quantity = int(body.amount * 100)
-        
-        logfire.info(f"Creating credit checkout for customer {customer_id} - ${body.amount} ({credit_quantity} credits)")
-        
-        if body.confirmed:
-            response_data = await autumn_client.attach(
-                customer_id=customer_id,
-                product_id="credit",
-                options=[
-                    {"feature_id": "gpu-credit-topup", "quantity": credit_quantity}
-                ],
-            )
-            if response_data:
-                logfire.info(f"Successfully attached credit for customer {customer_id}")
-                return {"success": True, "message": "Credits added successfully", "data": response_data}
-            else:
-                logfire.error(f"Failed to attach credit for customer {customer_id}")
-                raise HTTPException(status_code=500, detail="Failed to attach credit")
-        else:
-            response_data = await autumn_client.checkout(
-                customer_id=customer_id,
-                product_id="credit",  # Credit product ID in Autumn
-                options=[
-                    {
-                        "feature_id": "gpu-credit-topup",
-                        "quantity": credit_quantity
-                    }
-                ],
-                success_url=body.return_url or f"{os.getenv('FRONTEND_URL', 'https://app.comfydeploy.com')}/usage?topup=success",
-                customer_data={
-                    "name": (user_data.get("first_name") or "") + " " + (user_data.get("last_name") or ""),
-                    "email": user_email,
-                },
-            )
-        
-        if response_data:
-            logfire.info(f"Successfully created credit checkout for customer {customer_id}")
-            return response_data
-        else:
-            logfire.error(f"Failed to create credit checkout for customer {customer_id}")
-            raise HTTPException(status_code=500, detail="Failed to create checkout session")
-            
-    except Exception as e:
-        logfire.error(f"Error creating credit checkout: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to create checkout: {str(e)}")
+    """Billing bypassed — credits are unlimited."""
+    return {"success": True, "message": "Credits are unlimited (billing bypassed)"}
 
 async def get_subscription_items(subscription_id: str) -> List[Dict]:
     """Helper function to get subscription items from Stripe"""
@@ -1837,109 +1524,23 @@ async def calculate_usage_charges(
 async def get_customer_plan_v2(
     user_or_org_id: str,
 ):
-    # logfire.info(f"Fetching fresh data from Autumn for {user_or_org_id}")
-    # Fetch raw data from Autumn
-    autumn_data = await get_autumn_customer(user_or_org_id)
-    if not autumn_data:
-        logfire.warning(f"No data returned from Autumn for {user_or_org_id}")
-        return None
-
-    # Transform Autumn data to our format
-    plans = []
-    names = []
-    prices = []
-    amounts = []
-    charges = []
-    cancel_at_period_end = False
-    canceled_at = None
-    payment_issue = False
-    payment_issue_reason = ""
-
-    # Process products and add-ons
-    all_products = autumn_data.get("products", []) + autumn_data.get("add_ons", [])
-
-    for product in all_products:
-        # Only process active products
-        if product.get("status") == "active":
-            # Get the plan name directly from product id
-            plan_key = product.get("id", "")
-            if plan_key:  # Only add if we have a plan key
-                plans.append(plan_key)
-                names.append(product.get("name", ""))
-
-                # Process pricing information
-                product_prices = product.get("prices", [])
-                if product_prices:
-                    # Use the first price entry
-                    sorted_prices = sorted(
-                        product_prices,
-                        key=lambda x: x.get("amount", 0),
-                        reverse=True
-                    )
-                    price_info = sorted_prices[0]
-                    price_amount = price_info.get("amount", 0)
-
-                    # Add price ID and amount
-                    prices.append(plan_key)  # Using product ID as price ID
-                    amounts.append(price_amount * 100)
-
-                    # Calculate charges - using price amount directly for now
-                    charges.append(price_amount * 100)
-
-        # Check for canceled products for cancel status
-        product_canceled_at = product.get("canceled_at")
-        if product.get("status") == "canceled" or product_canceled_at:
-            cancel_at_period_end = True
-            canceled_at = product_canceled_at
-
-    # Extract payment issues
-    if any(product.get("status") not in ["active", "canceled"] for product in all_products):
-        payment_issue = True
-        payment_issue_reason = "Payment issue with subscription"
-
-    # Check if we have invoices data to compute charges
-    invoices = autumn_data.get("invoices", [])
-    if invoices and not charges:  # Use invoice data if available and charges is empty
-        for invoice in invoices:
-            if invoice.get("status") == "paid":
-                charges.append(invoice.get("total", 0))
-
-    # --- Stripe ID Extraction from Autumn ---
-    stripe_customer_id = autumn_data.get("stripe_id")
-    stripe_subscription_id = None
-    products = autumn_data.get("products", [])
-    if products and products[0].get("subscription_ids"):
-        # Use the first subscription_id from the first product
-        stripe_subscription_id = products[0]["subscription_ids"][0]
-    # --- End Stripe ID Extraction ---
-
-    # Create the transformed data structure
-    transformed_data = {
-        "plans": plans,
-        "names": names,
-        "prices": prices,
-        "amount": amounts,
-        "charges": charges,
-        "cancel_at_period_end": cancel_at_period_end,
-        "canceled_at": canceled_at,
-        "payment_issue": payment_issue,
-        "payment_issue_reason": payment_issue_reason,
-        "autumn_data": autumn_data,  # Keep the original data for reference
-        "last_invoice_timestamp": get_last_invoice_timestamp_from_autumn(autumn_data),
-        "source": "autumn",
+    """Always returns enterprise plan data — billing is fully bypassed."""
+    return {
+        "plans": ["self_hosted_enterprise"],
+        "names": ["Self Hosted Enterprise"],
+        "prices": [],
+        "amount": [],
+        "charges": [],
+        "cancel_at_period_end": False,
+        "canceled_at": None,
+        "payment_issue": False,
+        "payment_issue_reason": "",
+        "source": "self_hosted",
         "last_update": int(datetime.now().timestamp()),
-        # --- Stripe IDs for downstream use ---
-        "stripe_customer_id": stripe_customer_id,
-        "subscription_id": stripe_subscription_id,
+        "stripe_customer_id": None,
+        "subscription_id": None,
+        "last_invoice_timestamp": None,
     }
-
-    # try:
-    #     await redisMeta.set(redis_key, transformed_data)
-    #     logfire.info(f"Cached transformed Autumn data in Redis for {user_or_org_id}")
-    # except Exception as e:
-    #     logfire.error(f"Error updating {user_or_org_id} plan in Redis: {str(e)}")
-
-    return transformed_data
 
 
 @multi_level_cached(

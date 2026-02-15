@@ -1,4 +1,5 @@
 import os
+import re
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -11,9 +12,17 @@ load_dotenv()
 # Use environment variables for database connection
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Ensure the URL uses the asyncpg dialect
-if DATABASE_URL and not DATABASE_URL.startswith("postgresql+asyncpg://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+if DATABASE_URL:
+    # Handle postgres:// scheme (Neon) → postgresql+asyncpg://
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif not DATABASE_URL.startswith("postgresql+asyncpg://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    # Strip query params incompatible with asyncpg (sslmode, channel_binding)
+    DATABASE_URL = re.sub(r"[?&](sslmode|channel_binding)=[^&]*", "", DATABASE_URL)
+    # Clean up leftover ? or & at the end
+    DATABASE_URL = re.sub(r"[?&]$", "", DATABASE_URL)
 
 MAX_EXPECTED_CONCURRENCY = 200  # Document your design target
 
