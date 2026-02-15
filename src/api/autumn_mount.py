@@ -17,6 +17,12 @@ _autumn_products.FreeTrial.model_fields["duration"].annotation = _PatchedFreeTri
 _autumn_products.FreeTrial.model_rebuild(force=True)
 _autumn_products.Product.model_rebuild(force=True)
 
+# Rebuild all response models that reference Product so Pydantic picks up the patched enum
+import autumn.models.response as _autumn_response
+_autumn_response.ListProductResponse.model_rebuild(force=True)
+_autumn_response.CheckoutResponse.model_rebuild(force=True)
+_autumn_response.CheckResponse.model_rebuild(force=True)
+
 from autumn.asgi import AutumnASGI
 from typing import TYPE_CHECKING, Optional, TypedDict
 from clerk_backend_api import Clerk
