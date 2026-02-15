@@ -260,15 +260,14 @@ async def get_optimized_image_response(
     default_cloudfront_domain = os.getenv('COMPANY_CLOUDFRONT_DOMAIN')
     custom_cloudfront_domain = user_settings.cloudfront_domain
     if is_public:
-        # Default bucket - always use company CDN
-        if not s3_config.is_custom:
+        # Default bucket - use company CDN if available
+        if not s3_config.is_custom and default_cloudfront_domain:
             public_url = f"https://{default_cloudfront_domain}/{optimized_key}"
         # Custom bucket - check CloudFront preference
         elif user_settings and user_settings.use_cloudfront and custom_cloudfront_domain:
-            print(f"custom_cloudfront_domain: {custom_cloudfront_domain}")
             public_url = f"https://{custom_cloudfront_domain}/{optimized_key}"
         else:
-            # Direct bucket access
+            # Direct bucket access (R2, S3, etc.)
             public_url = s3_config.get_public_url(optimized_key)
         
         return RedirectResponse(url=public_url, status_code=302, headers=headers)
@@ -327,11 +326,17 @@ async def check_s3_object_exists(s3_config: S3Config, s3_key: str) -> bool:
     key_builder=lambda config, s3_key: f"s3_object_public:{s3_key}",
 )
 async def check_s3_object_public(s3_config: S3Config, s3_key: str) -> bool:
-    """Check if S3 object is publicly accessible"""
+    """Check if S3 object is publicly accessible.
+
+    R2 does not support the S3 ACL API, so we fall back to the bucket-level
+    public setting from s3_config when endpoint_url is set.
+    """
+    if s3_config.endpoint_url:
+        return s3_config.public
+
     import aioboto3
     from botocore.exceptions import ClientError
-    
-    # with logfire.span("check_s3_object_public", extra={"s3_key": s3_key}):
+
     try:
         session = aioboto3.Session()
         async with session.client(
@@ -339,11 +344,11 @@ async def check_s3_object_public(s3_config: S3Config, s3_key: str) -> bool:
             region_name=s3_config.region,
             aws_access_key_id=s3_config.access_key,
             aws_secret_access_key=s3_config.secret_key,
-            aws_session_token=s3_config.session_token
+            aws_session_token=s3_config.session_token,
         ) as s3:
             # Get object ACL
             acl = await s3.get_object_acl(Bucket=s3_config.bucket, Key=s3_key)
-            
+
             # Check if there's a public read grant
             for grant in acl.get('Grants', []):
                 grantee = grant.get('Grantee', {})
