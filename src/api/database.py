@@ -11,9 +11,19 @@ load_dotenv()
 # Use environment variables for database connection
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Ensure the URL uses the asyncpg dialect
-if DATABASE_URL and not DATABASE_URL.startswith("postgresql+asyncpg://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+if DATABASE_URL:
+    # Ensure the URL uses the asyncpg dialect
+    if not DATABASE_URL.startswith("postgresql+asyncpg://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+
+    # asyncpg does not support sslmode or channel_binding as URL params
+    # (Neon adds these by default). Strip them and let asyncpg handle SSL natively.
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    _parsed = urlparse(DATABASE_URL)
+    _params = parse_qs(_parsed.query)
+    _params.pop("sslmode", None)
+    _params.pop("channel_binding", None)
+    DATABASE_URL = urlunparse(_parsed._replace(query=urlencode(_params, doseq=True)))
 
 MAX_EXPECTED_CONCURRENCY = 200  # Document your design target
 
