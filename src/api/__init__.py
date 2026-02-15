@@ -190,8 +190,12 @@ else:
             # Staging
             "https://staging.app.comfydeploy.com",
             "https://staging.studio.comfydeploy.com",
+            # Wildlife LA
+            "https://comfydeploy.wildlife.la",
         ]
     )
+    # Allow Vercel preview deployments
+    allow_origin_regex = r"https://.*\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
