@@ -1,4 +1,9 @@
 import logging
+import os
+import traceback  # Ensure this import is present at the top
+import time  # Ensure this import is present at the top
+from datetime import datetime, timezone
+
 from starlette.routing import Match  
 from api.routes.platform import get_clerk_user
 from fastapi import Request, HTTPException
@@ -10,9 +15,9 @@ from cachetools import TTLCache
 from typing import Dict
 from fnmatch import fnmatch
 import logfire
-import time  # Ensure this import is present at the top
 from api.router import app
-import traceback  # Ensure this import is present at the top
+from sqlalchemy import select
+from api.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -182,10 +187,48 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return path.startswith("/api")
 
     async def authenticate(self, request: Request):
-        request.state.current_user = await get_current_user(request)
+        try:
+            request.state.current_user = await get_current_user(request)
+        except HTTPException as e:
+            raise e
+        except Exception as e:
+            logger.error(f"Error getting current user: {e}")
+            raise HTTPException(status_code=401, detail="Authentication failed")
         
         if request.state.current_user is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
+
+        # JIT User Provisioning for Self-Hosted Mode (or if webhook failed)
+        # We ensure the user exists in the DB so that other queries don't fail.
+        user_id = request.state.current_user.get("user_id")
+        if user_id:
+            try:
+                async with AsyncSessionLocal() as db:
+                    # Check if user exists
+                    result = await db.execute(select(User).where(User.id == user_id))
+                    user = result.scalar_one_or_none()
+
+                    if not user:
+                        logger.info(f"JIT Provisioning: Creating missing user {user_id}")
+                        # Extract info or use defaults
+                        # JWT might not have name/username depending on Clerk config
+                        username = request.state.current_user.get("username", f"user_{user_id[:8]}")
+                        name = request.state.current_user.get("name") or request.state.current_user.get("first_name", "Unknown")
+                        
+                        new_user = User(
+                            id=user_id,
+                            username=username,
+                            name=name,
+                            created_at=datetime.now(timezone.utc),
+                            updated_at=datetime.now(timezone.utc),
+                        )
+                        db.add(new_user)
+                        await db.commit()
+                        logger.info(f"JIT Provisioning: Successfully created user {user_id}")
+            except Exception as e:
+                # Don't block auth if JIT fails, but log it. 
+                # Concurrency could cause "duplicate key" if race condition, which is fine (user exists).
+                logger.error(f"JIT Provisioning error for user {user_id}: {e}")
         
         if self.should_check_scopes(request):
             await self.check_token_scopes(request)

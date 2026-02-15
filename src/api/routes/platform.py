@@ -57,6 +57,26 @@ router = APIRouter(
 AUTUMN_API_KEY = os.getenv("AUTUMN_SECRET_KEY")
 AUTUMN_API_URL = "https://api.useautumn.com/v1"
 
+# Self-hosted mode helpers
+def is_self_hosted() -> bool:
+    """Check if running in self-hosted mode (no Autumn/Clerk)"""
+    return os.getenv("SELF_HOSTED_MODE") == "true"
+
+def get_self_hosted_autumn_data() -> dict:
+    """Return mock Autumn data for self-hosted mode with unlimited access"""
+    return {
+        "customer_id": "self-hosted",
+        "features": {
+            "gpu-credit": {
+                "limit": None,  # Unlimited
+                "usage": 0,
+                "credit_schema": []
+            }
+        },
+        "plan": "enterprise",
+        "invoices": []
+    }
+
 @router.get("/platform/user-settings")
 async def get_user_settings(
     request: Request,

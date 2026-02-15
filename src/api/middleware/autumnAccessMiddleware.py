@@ -1,4 +1,5 @@
 import logging
+import os
 from fnmatch import fnmatch
 from typing import Dict, Any, Optional
 
@@ -30,8 +31,17 @@ class AutumnAccessMiddleware(BaseHTTPMiddleware):
             return response
         except HTTPException as exc:
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        except Exception as exc:
+            # Fail-open: if Autumn is unreachable, allow the request
+            logger.error(f"AutumnAccessMiddleware error: {str(exc)}")
+            response = await call_next(request)
+            return response
 
     async def _should_block(self, request: Request) -> bool:
+        # Self-hosted mode: skip all Autumn feature checks
+        if os.getenv("SELF_HOSTED_MODE") == "true":
+            return False
+
         path = request.url.path
         method = request.method.upper()
 

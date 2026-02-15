@@ -200,7 +200,7 @@ async def get_current_user(request: Request):
     else:
         raise HTTPException(status_code=401, detail="Invalid or missing token")
 
-    # Check API auth
+    # Check API auth (internal JWT)
     user_data = await parse_jwt(token)
 
     is_clerk_token = False
@@ -226,3 +226,4 @@ async def get_current_user(request: Request):
             raise HTTPException(status_code=401, detail="Revoked token")
     
     return user_data
+

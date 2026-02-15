@@ -24,11 +24,16 @@ if DATABASE_URL:
     # Clean up leftover ? or & at the end
     DATABASE_URL = re.sub(r"[?&]$", "", DATABASE_URL)
 
+connect_args = {}
+if DATABASE_URL and "neon" in DATABASE_URL:
+    connect_args["ssl"] = "require"
+
 MAX_EXPECTED_CONCURRENCY = 200  # Document your design target
 
 # Configure engine with larger pool size and longer timeout
 engine = create_async_engine(
     DATABASE_URL,
+    connect_args=connect_args,
     poolclass=AsyncAdaptedQueuePool,
     # Neon recommended settings for serverless
     pool_size=25,  # Reduced from 100 - better for 2 workers on 4 CPUs
