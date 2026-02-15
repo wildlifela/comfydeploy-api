@@ -195,9 +195,10 @@ async def trigger_image_optimization(
             access_key=s3_config.access_key,
             secret_key=s3_config.secret_key,
             session_token=s3_config.session_token,
+            endpoint_url=s3_config.endpoint_url,
             expiration=300
         )
-        
+
         output_url = generate_presigned_url(
             bucket=s3_config.bucket,
             object_key=optimized_key,
@@ -207,7 +208,8 @@ async def trigger_image_optimization(
             session_token=s3_config.session_token,
             expiration=300,
             http_method="PUT",
-            public=transform_config["is_public"]
+            public=transform_config["is_public"],
+            endpoint_url=s3_config.endpoint_url,
         )
 
         optimize_image = modal.Function.from_name("image-optimizer", "optimize_image")
@@ -257,8 +259,6 @@ async def get_optimized_image_response(
     
     default_cloudfront_domain = os.getenv('COMPANY_CLOUDFRONT_DOMAIN')
     custom_cloudfront_domain = user_settings.cloudfront_domain
-    default_bucket_domain = f"{s3_config.bucket}.s3.{s3_config.region}.amazonaws.com"
-    
     if is_public:
         # Default bucket - always use company CDN
         if not s3_config.is_custom:
@@ -268,8 +268,8 @@ async def get_optimized_image_response(
             print(f"custom_cloudfront_domain: {custom_cloudfront_domain}")
             public_url = f"https://{custom_cloudfront_domain}/{optimized_key}"
         else:
-            # Direct bucket access for privacy
-            public_url = f"https://{default_bucket_domain}/{optimized_key}"
+            # Direct bucket access
+            public_url = s3_config.get_public_url(optimized_key)
         
         return RedirectResponse(url=public_url, status_code=302, headers=headers)
     else:
@@ -281,6 +281,7 @@ async def get_optimized_image_response(
             access_key=s3_config.access_key,
             secret_key=s3_config.secret_key,
             session_token=s3_config.session_token,
+            endpoint_url=s3_config.endpoint_url,
             expiration=3600  # 1 hour
         )
     return RedirectResponse(url=presigned_url, status_code=302, headers=headers)

@@ -1091,7 +1091,7 @@ async def _create_run(
                     ContentType=content_type,
                 )
                 
-                file_url = f"https://{s3_config.bucket}.s3.{s3_config.region}.amazonaws.com/{file_path}"
+                file_url = s3_config.get_public_url(file_path)
                 return file_url
         
         # OPTIMIZATION 4: Process all base64 items found in scan
@@ -1202,6 +1202,7 @@ async def _create_run(
                                                     access_key=s3_config.access_key,
                                                     secret_key=s3_config.secret_key,
                                                     session_token=s3_config.session_token or "",
+                                                    endpoint_url=s3_config.endpoint_url,
                                                     expiration=3600  # 1 hour expiration
                                                 )
                                                 if temp_url:
@@ -1219,6 +1220,7 @@ async def _create_run(
                                                     access_key=s3_config.access_key,
                                                     secret_key=s3_config.secret_key,
                                                     session_token=s3_config.session_token or "",
+                                                    endpoint_url=s3_config.endpoint_url,
                                                     expiration=3600  # 1 hour expiration
                                                 )
                                                 if temp_url:

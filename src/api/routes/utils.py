@@ -445,7 +445,8 @@ async def post_process_output_data(data, user_settings):
                             region,
                             access_key,
                             secret_key,
-                            session_token
+                            session_token,
+                            endpoint_url=s3_config.endpoint_url,
                         )
     return data
 
@@ -652,14 +653,21 @@ async def get_user_settings_cached_as_object(request: Request, db: AsyncSession)
 
 
 def get_temporary_download_url(
-    url: str, region: str, access_key: str, secret_key: str, session_token: str, expiration: int = 3600
+    url: str, region: str, access_key: str, secret_key: str, session_token: str,
+    endpoint_url: str = None, expiration: int = 3600
 ) -> str:
     # Parse the URL
     parsed_url = urlparse(url)
 
-    # Extract bucket name and object key
-    bucket = parsed_url.netloc.split(".")[0]
-    object_key = unquote(parsed_url.path.lstrip("/"))
+    if endpoint_url:
+        # S3-compatible storage (R2, MinIO, etc.) - bucket is first path component
+        path_parts = parsed_url.path.lstrip("/").split("/", 1)
+        bucket = path_parts[0]
+        object_key = unquote(path_parts[1]) if len(path_parts) > 1 else ""
+    else:
+        # AWS S3 - bucket is subdomain
+        bucket = parsed_url.netloc.split(".")[0]
+        object_key = unquote(parsed_url.path.lstrip("/"))
 
     # Generate and return the presigned URL
     return generate_presigned_download_url(
@@ -669,6 +677,7 @@ def get_temporary_download_url(
         access_key=access_key,
         secret_key=secret_key,
         session_token=session_token,
+        endpoint_url=endpoint_url,
         expiration=expiration,
     )
 
@@ -680,16 +689,19 @@ def generate_presigned_download_url(
     access_key: str,
     secret_key: str,
     session_token: str,
+    endpoint_url: str = None,
     expiration: int = 3600,
 ):
-    s3_client = boto3.client(
-        "s3",
+    kwargs = dict(
         region_name=region,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         aws_session_token=session_token,
         config=Config(signature_version="s3v4"),
     )
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    s3_client = boto3.client("s3", **kwargs)
 
     try:
         response = s3_client.generate_presigned_url(
@@ -718,15 +730,18 @@ def generate_presigned_url(
     size=None,
     content_type=None,
     public=False,
+    endpoint_url: str = None,
 ):
-    s3_client = boto3.client(
-        "s3",
+    kwargs = dict(
         region_name=region,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         aws_session_token=session_token,
         config=Config(signature_version="s3v4"),
     )
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    s3_client = boto3.client("s3", **kwargs)
     params = {
         "Bucket": bucket,
         "Key": object_key,
@@ -756,14 +771,16 @@ def generate_presigned_url(
 async def initiate_multipart_upload(request: Request, db: AsyncSession, key: str, content_type: str) -> str:
     user_settings = await get_user_settings_cached_as_object(request, db)
     s3_config = await retrieve_s3_config(user_settings)
-    s3 = boto3.client(
-        "s3",
+    kwargs = dict(
         region_name=s3_config.region,
         aws_access_key_id=s3_config.access_key,
         aws_secret_access_key=s3_config.secret_key,
-        aws_session_token=getattr(s3_config, "session_token", None),
+        aws_session_token=s3_config.session_token,
         config=Config(signature_version="s3v4"),
     )
+    if s3_config.endpoint_url:
+        kwargs["endpoint_url"] = s3_config.endpoint_url
+    s3 = boto3.client("s3", **kwargs)
     resp = s3.create_multipart_upload(Bucket=s3_config.bucket, Key=key, ContentType=content_type)
     return resp["UploadId"]
 
@@ -771,14 +788,16 @@ async def initiate_multipart_upload(request: Request, db: AsyncSession, key: str
 async def generate_part_upload_url(request: Request, db: AsyncSession, key: str, upload_id: str, part_number: int, expires: int = 3600) -> str:
     user_settings = await get_user_settings_cached_as_object(request, db)
     s3_config = await retrieve_s3_config(user_settings)
-    s3 = boto3.client(
-        "s3",
+    kwargs = dict(
         region_name=s3_config.region,
         aws_access_key_id=s3_config.access_key,
         aws_secret_access_key=s3_config.secret_key,
-        aws_session_token=getattr(s3_config, "session_token", None),
+        aws_session_token=s3_config.session_token,
         config=Config(signature_version="s3v4"),
     )
+    if s3_config.endpoint_url:
+        kwargs["endpoint_url"] = s3_config.endpoint_url
+    s3 = boto3.client("s3", **kwargs)
     return s3.generate_presigned_url(
         "upload_part",
         Params={
@@ -1079,31 +1098,37 @@ async def execute_with_org_check(
 
 
 def is_s3_url(url: str) -> bool:
-    """Check if a URL is an S3 URL"""
+    """Check if a URL is an S3 or S3-compatible (R2, etc.) URL"""
     if not isinstance(url, str) or not url.startswith("http"):
         return False
-    
+
     try:
         parsed = urlparse(url)
-        # Check for common S3 URL patterns
         hostname = parsed.hostname.lower() if parsed.hostname else ""
         return (
             ".s3." in hostname and "amazonaws.com" in hostname
         ) or (
             "s3." in hostname and "amazonaws.com" in hostname
-        ) or hostname.endswith(".amazonaws.com")
+        ) or hostname.endswith(".amazonaws.com") or (
+            ".r2.cloudflarestorage.com" in hostname
+        )
     except:
         return False
 
 
 def extract_s3_info_from_url(url: str) -> tuple[str, str]:
-    """Extract bucket and object key from S3 URL"""
+    """Extract bucket and object key from S3 or S3-compatible URL"""
     try:
         parsed = urlparse(url)
         hostname = parsed.hostname
         path = parsed.path.lstrip("/")
-        
-        if ".s3." in hostname and "amazonaws.com" in hostname:
+
+        if ".r2.cloudflarestorage.com" in hostname:
+            # R2 format: {account_id}.r2.cloudflarestorage.com/{bucket}/{key}
+            path_parts = path.split("/", 1)
+            bucket = path_parts[0] if path_parts else ""
+            object_key = path_parts[1] if len(path_parts) > 1 else ""
+        elif ".s3." in hostname and "amazonaws.com" in hostname:
             # Format: bucket.s3.region.amazonaws.com/key
             bucket = hostname.split(".")[0]
             object_key = path
@@ -1116,7 +1141,7 @@ def extract_s3_info_from_url(url: str) -> tuple[str, str]:
             # Fallback pattern
             bucket = hostname.split(".")[0] if hostname else ""
             object_key = path
-            
+
         return bucket, object_key
     except:
         return "", ""
@@ -1152,6 +1177,7 @@ async def process_inputs_s3_urls(inputs: Dict[str, Any], user_s3_config) -> Dict
                 access_key=user_s3_config.access_key,
                 secret_key=user_s3_config.secret_key,
                 session_token=user_s3_config.session_token or "",
+                endpoint_url=user_s3_config.endpoint_url,
                 expiration=3600  # 1 hour expiration
             )
             return temp_url if temp_url else value

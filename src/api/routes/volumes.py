@@ -1455,7 +1455,8 @@ async def generate_upload_url(
             http_method="PUT",
             content_type=body.contentType,
             public=False,  # Keep uploads private
-            session_token=session_token
+            session_token=session_token,
+            endpoint_url=s3_config.endpoint_url,
         )
         
         if not presigned_url:
@@ -1623,7 +1624,8 @@ async def add_model(
                     session_token=session_token,
                     expiration=3600,
                     http_method="GET",
-                    public=False
+                    public=False,
+                    endpoint_url=s3_config.endpoint_url,
                 )
                 
                 if not url:

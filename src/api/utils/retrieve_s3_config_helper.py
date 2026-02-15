@@ -14,6 +14,7 @@ global_region = os.getenv("SPACES_REGION_V2")
 global_access_key = os.getenv("SPACES_KEY_V2")
 global_secret_key = os.getenv("SPACES_SECRET_V2")
 global_endpoint = os.getenv("SPACES_ENDPOINT_V2")
+global_public_domain = os.getenv("SPACES_PUBLIC_DOMAIN_V2")
 
 # Cache for assumed role credentials
 _credentials_cache: Dict[str, Dict[str, Any]] = {}
@@ -161,6 +162,31 @@ class S3Config(BaseModel):
     is_custom: bool
     session_token: Optional[str] = None
     endpoint_url: Optional[str] = None
+    public_domain: Optional[str] = None
+
+    def get_public_url(self, key: str) -> str:
+        """Build a publicly accessible URL for the given object key.
+
+        Resolution order:
+        1. SPACES_PUBLIC_DOMAIN_V2 (custom public domain, e.g. R2 custom domain or r2.dev)
+        2. endpoint_url (S3-compatible API endpoint, e.g. R2) → {endpoint_url}/{bucket}/{key}
+        3. Default AWS S3 format → https://{bucket}.s3.{region}.amazonaws.com/{key}
+        """
+        if self.public_domain:
+            base = self.public_domain.rstrip("/")
+            return f"{base}/{key}"
+        if self.endpoint_url:
+            base = self.endpoint_url.rstrip("/")
+            return f"{base}/{self.bucket}/{key}"
+        return f"https://{self.bucket}.s3.{self.region}.amazonaws.com/{key}"
+
+    def get_public_base_url(self) -> str:
+        """Return the base URL (without trailing slash) for building composed endpoints."""
+        if self.public_domain:
+            return self.public_domain.rstrip("/")
+        if self.endpoint_url:
+            return f"{self.endpoint_url.rstrip('/')}/{self.bucket}"
+        return f"https://{self.bucket}.s3.{self.region}.amazonaws.com"
 
 
 async def retrieve_s3_config(user_settings: UserSettings) -> S3Config:
@@ -201,4 +227,5 @@ async def retrieve_s3_config(user_settings: UserSettings) -> S3Config:
         is_custom=is_custom,
         session_token=session_token,
         endpoint_url=endpoint_url,
+        public_domain=global_public_domain,
     )

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from .utils import (
     get_temporary_download_url,
+    generate_presigned_download_url,
     get_user_settings,
     generate_presigned_url,
 )
@@ -201,15 +202,17 @@ async def upload_file(
                 ContentType=file_type,
             )
 
-            file_url = f"https://{bucket}.s3.{region}.amazonaws.com/{file_path}"
+            file_url = s3_config.get_public_url(file_path)
 
             if not public:
-                file_url = get_temporary_download_url(
-                    file_url,
-                    region,
-                    access_key,
-                    secret_key,
-                    session_token,
+                file_url = generate_presigned_download_url(
+                    bucket=bucket,
+                    object_key=file_path,
+                    region=region,
+                    access_key=access_key,
+                    secret_key=secret_key,
+                    session_token=session_token,
+                    endpoint_url=endpoint_url,
                     expiration=3600,  # Set expiration to 1 hour
                 )
 
@@ -333,6 +336,7 @@ async def list_assets(
                     access_key=s3_config.access_key,
                     secret_key=s3_config.secret_key,
                     session_token=s3_config.session_token,
+                    endpoint_url=s3_config.endpoint_url,
                     expiration=3600,
                 )
     
@@ -465,8 +469,8 @@ async def upload_asset_file(
                 ContentType=file_type,
             )
 
-            file_url = f"https://{bucket}.s3.{region}.amazonaws.com/{s3_file_path}"  # Use S3 path
-            
+            file_url = s3_config.get_public_url(s3_file_path)
+
             # Store the original URL without generating temporary URL
             new_asset = Asset(
                 user_id=user_id,
@@ -488,12 +492,14 @@ async def upload_asset_file(
             
             # Generate temporary URL only for the response if needed
             if not public:
-                new_asset.file_url = get_temporary_download_url(
-                    file_url,
-                    region,
-                    access_key,
-                    secret_key,
-                    session_token,
+                new_asset.file_url = generate_presigned_download_url(
+                    bucket=bucket,
+                    object_key=s3_file_path,
+                    region=region,
+                    access_key=access_key,
+                    secret_key=secret_key,
+                    session_token=session_token,
+                    endpoint_url=s3_config.endpoint_url,
                     expiration=3600,
                 )
             
@@ -523,9 +529,8 @@ async def get_asset_upload_url(
     object_key = os.path.join("assets", parent_path.lstrip("/"), f"{file_id}{file_extension}").replace("\\", "/")
     db_file_path = os.path.join(parent_path.lstrip("/"), f"{file_id}{file_extension}").replace("\\", "/")
     
-    composed_endpoint = f"https://{s3_config.bucket}.s3.{s3_config.region}.amazonaws.com"
-    download_url = f"{composed_endpoint}/{object_key}"
-    
+    download_url = s3_config.get_public_url(object_key)
+
     # Generate pre-signed URL
     upload_url = generate_presigned_url(
         object_key=object_key,
@@ -539,6 +544,7 @@ async def get_asset_upload_url(
         access_key=s3_config.access_key,
         secret_key=s3_config.secret_key,
         session_token=session_token,
+        endpoint_url=s3_config.endpoint_url,
     )
     
     return {
@@ -626,9 +632,10 @@ async def search_assets(
                     access_key=s3_config.access_key,
                     secret_key=s3_config.secret_key,
                     session_token=session_token,
+                    endpoint_url=s3_config.endpoint_url,
                     expiration=3600,
                 )
-    
+
     return assets
 
 @router.get("/assets/{asset_id}", response_model=AssetResponse)
@@ -654,6 +661,7 @@ async def get_asset(
             access_key=s3_config.access_key,
             secret_key=s3_config.secret_key,
             session_token=session_token,
+            endpoint_url=s3_config.endpoint_url,
             expiration=3600,
         )
     

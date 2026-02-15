@@ -1059,9 +1059,7 @@ async def get_file_upload_url(
 
         # Encode the object key for use in the URL
         encoded_object_key = quote(object_key)
-        # SPACES_ENDPOINT_V2="https://comfy-deploy-output-dev.s3.amazonaws.com"
-        composed_endpoint = f"https://{s3_config.bucket}.s3.{s3_config.region}.amazonaws.com"
-        download_url = f"{composed_endpoint}/{encoded_object_key}"
+        download_url = s3_config.get_public_url(encoded_object_key)
 
         # Generate pre-signed S3 upload URL
         upload_url = generate_presigned_url(
@@ -1076,6 +1074,7 @@ async def get_file_upload_url(
             access_key=s3_config.access_key,
             secret_key=s3_config.secret_key,
             session_token=s3_config.session_token,
+            endpoint_url=s3_config.endpoint_url,
         )
 
         # if public:

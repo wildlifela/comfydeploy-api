@@ -112,15 +112,12 @@ async def build_cover_url(request: Request, db: AsyncSession, cover_image: str) 
     If the bucket is private, a temporary download URL is generated.
     """
     s3_config = await get_s3_config(request, db)
-    composed_endpoint = (
-        f"https://{s3_config.bucket}.s3.{s3_config.region}.amazonaws.com"
-    )
 
     # If cover_image is already a full URL just use it directly
     if cover_image.startswith("http://") or cover_image.startswith("https://"):
         url = cover_image
     else:
-        url = f"{composed_endpoint}/{cover_image}"
+        url = s3_config.get_public_url(cover_image)
 
     if not s3_config.public:
         url = get_temporary_download_url(
@@ -129,6 +126,7 @@ async def build_cover_url(request: Request, db: AsyncSession, cover_image: str) 
             access_key=s3_config.access_key,
             secret_key=s3_config.secret_key,
             session_token=s3_config.session_token,
+            endpoint_url=s3_config.endpoint_url,
             expiration=3600,
         )
 

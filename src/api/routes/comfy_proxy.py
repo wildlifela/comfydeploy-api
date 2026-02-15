@@ -125,10 +125,11 @@ async def get_comfy_org_upload_url(
         access_key=s3_config.access_key,
         secret_key=s3_config.secret_key,
         session_token=s3_config.session_token,
+        endpoint_url=s3_config.endpoint_url,
     )
     
     # Generate download URL
-    download_url = f"https://{s3_config.bucket}.s3.{s3_config.region}.amazonaws.com/{object_key}"
+    download_url = s3_config.get_public_url(object_key)
     
     logfire.info("Generated Comfy.org upload URL", extra={
         "file_name": file_name,
