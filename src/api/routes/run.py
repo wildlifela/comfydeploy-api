@@ -1073,14 +1073,16 @@ async def _create_run(
             file_path = f"inputs/{file_id}.{image_format}"
             
             # Upload to S3
-            async with aioboto3.Session().client(
-                "s3",
+            s3_run_kwargs = dict(
                 region_name=s3_config.region,
                 aws_access_key_id=s3_config.access_key,
                 aws_secret_access_key=s3_config.secret_key,
                 aws_session_token=s3_config.session_token,
                 config=Config(signature_version="s3v4"),
-            ) as s3_client:
+            )
+            if s3_config.endpoint_url:
+                s3_run_kwargs["endpoint_url"] = s3_config.endpoint_url
+            async with aioboto3.Session().client("s3", **s3_run_kwargs) as s3_client:
                 await s3_client.put_object(
                     Bucket=s3_config.bucket,
                     Key=file_path,

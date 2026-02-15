@@ -27,11 +27,13 @@ class S3ClientManager:
     async def get_s3_client(cls, s3_config: S3Config) -> aioboto3.Session.client:
         """Get an S3 client with the given configuration"""
         session = await cls.get_client(s3_config)
-        return session.client(
-            's3',
+        kwargs = dict(
             region_name=s3_config.region,
             aws_access_key_id=s3_config.access_key,
             aws_secret_access_key=s3_config.secret_key,
             aws_session_token=s3_config.session_token,
-            config=Config(signature_version="s3v4")
-        ) 
+            config=Config(signature_version="s3v4"),
+        )
+        if s3_config.endpoint_url:
+            kwargs["endpoint_url"] = s3_config.endpoint_url
+        return session.client('s3', **kwargs) 

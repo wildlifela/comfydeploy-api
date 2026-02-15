@@ -13,6 +13,7 @@ global_bucket = os.getenv("SPACES_BUCKET_V2")
 global_region = os.getenv("SPACES_REGION_V2")
 global_access_key = os.getenv("SPACES_KEY_V2")
 global_secret_key = os.getenv("SPACES_SECRET_V2")
+global_endpoint = os.getenv("SPACES_ENDPOINT_V2")
 
 # Cache for assumed role credentials
 _credentials_cache: Dict[str, Dict[str, Any]] = {}
@@ -159,6 +160,7 @@ class S3Config(BaseModel):
     secret_key: str
     is_custom: bool
     session_token: Optional[str] = None
+    endpoint_url: Optional[str] = None
 
 
 async def retrieve_s3_config(user_settings: UserSettings) -> S3Config:
@@ -169,6 +171,7 @@ async def retrieve_s3_config(user_settings: UserSettings) -> S3Config:
     secret_key = global_secret_key
     is_custom = False
     session_token = None
+    endpoint_url = global_endpoint
     
     if user_settings is not None:
         if user_settings.output_visibility == "private":
@@ -197,4 +200,5 @@ async def retrieve_s3_config(user_settings: UserSettings) -> S3Config:
         secret_key=secret_key,
         is_custom=is_custom,
         session_token=session_token,
+        endpoint_url=endpoint_url,
     )

@@ -1,5 +1,22 @@
 import os
 from fastapi import HTTPException
+
+# Patch autumn-py SDK: FreeTrialDuration enum only has "day", missing "month"/"year"
+# This causes Pydantic validation errors when products have non-day trial durations
+import autumn.models.products as _autumn_products
+from enum import Enum
+
+class _PatchedFreeTrialDuration(str, Enum):
+    DAY = "day"
+    MONTH = "month"
+    YEAR = "year"
+
+_autumn_products.FreeTrialDuration = _PatchedFreeTrialDuration
+# Also patch the FreeTrial model's duration field to use the new enum
+_autumn_products.FreeTrial.model_fields["duration"].annotation = _PatchedFreeTrialDuration
+_autumn_products.FreeTrial.model_rebuild(force=True)
+_autumn_products.Product.model_rebuild(force=True)
+
 from autumn.asgi import AutumnASGI
 from typing import TYPE_CHECKING, Optional, TypedDict
 from clerk_backend_api import Clerk

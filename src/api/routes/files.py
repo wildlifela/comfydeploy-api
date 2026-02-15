@@ -152,6 +152,7 @@ async def upload_file(
     access_key = s3_config.access_key
     secret_key = s3_config.secret_key
     session_token = s3_config.session_token
+    endpoint_url = s3_config.endpoint_url
 
     # File size check
     file_size = file.size
@@ -179,14 +180,17 @@ async def upload_file(
     # else:
     file_path = f"inputs/{file_id}{file_extension}"
 
-    async with aioboto3.Session().client(
-        "s3",
+    s3_client_kwargs = dict(
         region_name=region,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         aws_session_token=session_token,
         config=Config(signature_version="s3v4"),
-    ) as s3_client:
+    )
+    if endpoint_url:
+        s3_client_kwargs["endpoint_url"] = endpoint_url
+
+    async with aioboto3.Session().client("s3", **s3_client_kwargs) as s3_client:
         try:
             file_content = await file.read()
             await s3_client.put_object(
@@ -369,13 +373,16 @@ async def delete_asset(
         # Prefix the path with 'assets/' for S3 operations
         s3_path = f"assets/{asset.path}"
 
-        async with aioboto3.Session().client(
-            "s3",
+        s3_del_kwargs = dict(
             region_name=region,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             aws_session_token=session_token,
-        ) as s3_client:
+        )
+        if s3_config.endpoint_url:
+            s3_del_kwargs["endpoint_url"] = s3_config.endpoint_url
+
+        async with aioboto3.Session().client("s3", **s3_del_kwargs) as s3_client:
             await s3_client.delete_object(Bucket=bucket, Key=s3_path)
 
     await db.delete(asset)
@@ -437,14 +444,17 @@ async def upload_asset_file(
     # Create the database path without 'assets' prefix
     db_file_path = os.path.join(parent_path.lstrip("/"), f"{file_id}{file_extension}").replace("\\", "/")
 
-    async with aioboto3.Session().client(
-        "s3",
+    s3_upload_kwargs = dict(
         region_name=region,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         aws_session_token=session_token,
         config=Config(signature_version="s3v4"),
-    ) as s3_client:
+    )
+    if s3_config.endpoint_url:
+        s3_upload_kwargs["endpoint_url"] = s3_config.endpoint_url
+
+    async with aioboto3.Session().client("s3", **s3_upload_kwargs) as s3_client:
         try:
             file_content = await file.read()
             await s3_client.put_object(
