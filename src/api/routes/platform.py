@@ -1859,8 +1859,8 @@ async def get_customer_plan_v2(
     all_products = autumn_data.get("products", []) + autumn_data.get("add_ons", [])
 
     for product in all_products:
-        # Only process active products
-        if product.get("status") == "active":
+        # Process active and trialing products
+        if product.get("status") in ("active", "trialing"):
             # Get the plan name directly from product id
             plan_key = product.get("id", "")
             if plan_key:  # Only add if we have a plan key

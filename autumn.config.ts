@@ -413,6 +413,12 @@ export const deploymentYearly = product({
 export const businessMonthly = product({
 	id: "business_monthly",
 	name: "Business (Monthly)",
+	free_trial: {
+		duration: "year",
+		length: 1,
+		unique_fingerprint: false,
+		card_required: false,
+	},
 	items: [
 		priceItem({
 			price: 998,
