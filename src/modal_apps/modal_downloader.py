@@ -117,8 +117,11 @@ async def modal_download_file_task(
                     )
                     parent_dir = os.path.dirname(full_path)
                     print(f"[DOWNLOADER] Creating dirs: '{parent_dir}' (full_path='{full_path}')")
-                    os.makedirs(parent_dir, exist_ok=True)
-                    print(f"[DOWNLOADER] Dir created OK. Opening file for write...")
+                    if parent_dir:
+                        os.makedirs(parent_dir, exist_ok=True)
+                        print(f"[DOWNLOADER] Dir created OK. Opening file for write...")
+                    else:
+                        print(f"[DOWNLOADER] No parent dir to create. Opening file for write...")
 
                     # Start progress reporting task
                     progress_task = asyncio.create_task(report_progress())

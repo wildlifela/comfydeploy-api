@@ -499,6 +499,11 @@ async def handle_file_download(
     try:
         volume_name = await get_volume_name(request, db)
 
+        # Safety: default folder_path to 'checkpoints/' if not provided
+        if not folder_path or not folder_path.strip():
+            folder_path = "checkpoints"
+            logger.warning(f"[handle_file_download] folder_path was empty, defaulting to 'checkpoints'")
+
         user_settings = await get_user_settings(request, db)
         hugging_face_token = os.environ.get("HUGGINGFACE_TOKEN")
         if user_settings is not None and user_settings.hugging_face_token:
