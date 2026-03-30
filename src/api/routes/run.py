@@ -839,13 +839,15 @@ def sanitize_workflow_seeds(workflow_api: Dict[str, Any]):
     """
     Sanitize seed values for specific API nodes that only support 32-bit integers.
     ComfyUI's random seeds are often 64-bit, causing validation errors.
+    Also forces "fixed" mode to stop ComfyUI server from randomizing internally.
     """
     problematic_node_types = [
         "TencentImageToModelNode",
         "MeshyImageToModelNode", 
         "MeshyTextToModelNode",
         "ViduImageToVideoNode",
-        "ViduTextToVideoNode"
+        "ViduTextToVideoNode",
+        "Hunyuan3D"
     ]
     
     # Max value for a 32-bit signed integer
@@ -860,14 +862,27 @@ def sanitize_workflow_seeds(workflow_api: Dict[str, Any]):
         # Check if the node is in our known problematic list
         if any(pt in class_type for pt in problematic_node_types):
             inputs = node.get("inputs", {})
+            
+            # 1. Clamp any integer seed value
             if "seed" in inputs:
                 seed_val = inputs["seed"]
-                
-                # If seed is a large integer, clamp it using modulo
                 if isinstance(seed_val, int) and seed_val > MAX_32_INT:
                     new_seed = seed_val % MAX_32_INT
                     logger.info(f"[SEED SANITIZER] Clamping seed for {class_type} ({node_id}): {seed_val} -> {new_seed}")
                     inputs["seed"] = new_seed
+            
+            # 2. Force "fixed" mode to prevent server-side randomization.
+            # We add/set common control widget names just in case.
+            # In ComfyUI's API, these can be added to inputs to override default state.
+            control_keys = ["seed_control", "control_after_generate", "seed_mode"]
+            for ck in control_keys:
+                # Force "fixed" to override any "randomize" setting in the node's internal state
+                inputs[ck] = "fixed"
+                    
+            # 3. Ensure a seed exists if missing, otherwise ComfyUI uses its default (often randomize)
+            if "seed" not in inputs:
+                inputs["seed"] = random.randint(0, MAX_32_INT)
+                logger.info(f"[SEED SANITIZER] Added safe fixed seed for {class_type} ({node_id}): {inputs['seed']}")
 
 
 async def _create_run(
@@ -1054,7 +1069,7 @@ async def _create_run(
             raise HTTPException(status_code=404, detail="Machine not found")
 
     # Convert base64 images to S3 URLs before database operations
-    async def convert_base64_to_s3(inputs_dict, workflow_api_data):
+    async def convert_base64_to_s3(inputs_dict, workflow_api_data, current_user_settings):
         """Convert base64 image inputs to S3 URLs with early exit optimization"""
         base64_prefixes = ('data:image/png;base64,', 'data:image/jpeg;base64,', 'data:image/jpg;base64,')
         
@@ -1082,7 +1097,7 @@ async def _create_run(
             return  # Exit immediately, saves ~5-15ms S3 config fetch
         
         # Only fetch S3 config when base64 images are actually present
-        s3_config = await retrieve_s3_config(user_settings)
+        s3_config = await retrieve_s3_config(current_user_settings)
         
         # OPTIMIZATION 3: Reusable upload function with format detection
         async def upload_base64_to_s3(base64_data: str) -> str:
@@ -1139,13 +1154,13 @@ async def _create_run(
                 _, node_id, field, value = item
                 workflow_api_data[node_id]["inputs"][field] = await upload_base64_to_s3(value)
 
-    async def run(inputs: Dict[str, Any] = None, batch_id: Optional[UUID] = None):
+    async def run(inputs: Dict[str, Any] = None, batch_id: Optional[UUID] = None, current_user_settings = None):
         # Make it an empty so it will not get stuck
         if inputs is None:
             inputs = {}
 
         # Convert base64 images to S3 URLs before processing
-        await convert_base64_to_s3(inputs if inputs else data.inputs, workflow_api_raw)
+        await convert_base64_to_s3(inputs if inputs else data.inputs, workflow_api_raw, current_user_settings)
 
         prompt_id = uuid.uuid4()
         user_id = request.state.current_user["user_id"]
@@ -1221,8 +1236,8 @@ async def _create_run(
             # Process S3 URLs in ComfyUIDeployExternalImage nodes for both workflow_api_raw and workflow_api
             if workflow_api:
                 try:
-                    if user_settings:
-                        s3_config = await retrieve_s3_config(user_settings)
+                    if current_user_settings:
+                        s3_config = await retrieve_s3_config(current_user_settings)
                         if s3_config and not s3_config.public:
                             # Helper function to process S3 URLs in a workflow
                             def process_s3_urls_in_workflow(workflow_data):
@@ -1557,7 +1572,7 @@ async def _create_run(
                                                 )
                                                 await post_process_output_data(
                                                     data.get("data", {}).get("output"),
-                                                    user_settings,
+                                                    current_user_settings,
                                                 )
                                                 new_event_data = {
                                                     "event": "executed",
@@ -1628,7 +1643,7 @@ async def _create_run(
                 new_data = data.model_copy(update={"inputs": new_inputs})
 
                 # Run the workflow with the new inputs
-                result = await run(new_data.inputs, batch_id)
+                result = await run(new_data.inputs, batch_id, current_user_settings=user_settings)
                 results.append(result)
             return results
 
@@ -1643,7 +1658,7 @@ async def _create_run(
         async def batch_run():
             results = []
             for _ in range(data.batch_number):
-                result = await run(data.inputs, batch_id)
+                result = await run(data.inputs, batch_id, current_user_settings=user_settings)
                 results.append(result)
             return results
 
@@ -1651,6 +1666,4 @@ async def _create_run(
 
         return {"status": "success", "batch_id": str(batch_id)}
     else:
-        return await run(
-            data.inputs,
-        )
+        return await run(data.inputs, None, current_user_settings=user_settings)
