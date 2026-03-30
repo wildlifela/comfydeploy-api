@@ -523,6 +523,18 @@ async def handle_file_download(
 
         async def event_generator():
             try:
+                effective_upload_type = "huggingface" if "huggingface.co" in download_url else upload_type
+                logger.info(
+                    f"[MODAL CALL] modal_download_file_task args:\n"
+                    f"  download_url   = {download_url[:80]}...\n"
+                    f"  folder_path    = {folder_path}\n"
+                    f"  filename       = {filename}\n"
+                    f"  db_model_id    = {db_model_id}\n"
+                    f"  full_path      = {full_path}\n"
+                    f"  volume_name    = {volume_name}\n"
+                    f"  upload_type    = {effective_upload_type}\n"
+                    f"  token_present  = {hugging_face_token is not None}"
+                )
                 async for event in modal_download_file_task.remote_gen.aio(
                     download_url,
                     folder_path,
@@ -530,7 +542,7 @@ async def handle_file_download(
                     db_model_id,
                     full_path,
                     volume_name,
-                    "huggingface" if "huggingface.co" in download_url else upload_type,
+                    effective_upload_type,
                     hugging_face_token,
                 ):
                     # Update database with the event status

@@ -814,14 +814,16 @@ async def generate_part_upload_url(request: Request, db: AsyncSession, key: str,
 async def complete_multipart_upload(request: Request, db: AsyncSession, key: str, upload_id: str, parts: List[Dict[str, Any]]):
     user_settings = await get_user_settings_cached_as_object(request, db)
     s3_config = await retrieve_s3_config(user_settings)
-    s3 = boto3.client(
-        "s3",
+    kwargs = dict(
         region_name=s3_config.region,
         aws_access_key_id=s3_config.access_key,
         aws_secret_access_key=s3_config.secret_key,
         aws_session_token=getattr(s3_config, "session_token", None),
         config=Config(signature_version="s3v4"),
     )
+    if getattr(s3_config, "endpoint_url", None):
+        kwargs["endpoint_url"] = s3_config.endpoint_url
+    s3 = boto3.client("s3", **kwargs)
     sorted_parts = sorted(
         [{"ETag": p["eTag"], "PartNumber": int(p["partNumber"])} for p in parts],
         key=lambda p: p["PartNumber"],
@@ -837,14 +839,16 @@ async def complete_multipart_upload(request: Request, db: AsyncSession, key: str
 async def abort_multipart_upload(request: Request, db: AsyncSession, key: str, upload_id: str):
     user_settings = await get_user_settings_cached_as_object(request, db)
     s3_config = await retrieve_s3_config(user_settings)
-    s3 = boto3.client(
-        "s3",
+    kwargs = dict(
         region_name=s3_config.region,
         aws_access_key_id=s3_config.access_key,
         aws_secret_access_key=s3_config.secret_key,
         aws_session_token=getattr(s3_config, "session_token", None),
         config=Config(signature_version="s3v4"),
     )
+    if getattr(s3_config, "endpoint_url", None):
+        kwargs["endpoint_url"] = s3_config.endpoint_url
+    s3 = boto3.client("s3", **kwargs)
     return s3.abort_multipart_upload(Bucket=s3_config.bucket, Key=key, UploadId=upload_id)
 
 

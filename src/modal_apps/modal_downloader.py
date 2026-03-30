@@ -115,12 +115,16 @@ async def modal_download_file_task(
                     progress_state["total_size"] = int(
                         response.headers.get("Content-Length", 0)
                     )
-                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    parent_dir = os.path.dirname(full_path)
+                    print(f"[DOWNLOADER] Creating dirs: '{parent_dir}' (full_path='{full_path}')")
+                    os.makedirs(parent_dir, exist_ok=True)
+                    print(f"[DOWNLOADER] Dir created OK. Opening file for write...")
 
                     # Start progress reporting task
                     progress_task = asyncio.create_task(report_progress())
 
                     with open(full_path, "wb") as file:
+                        print(f"[DOWNLOADER] File opened OK, starting download...")
                         async for data in response.content.iter_chunked(65536):
                             if data:
                                 file.write(data)
@@ -132,9 +136,11 @@ async def modal_download_file_task(
                     # Clean up progress reporting
                     progress_state["should_stop"] = True
                     await progress_task
+                    print(f"[DOWNLOADER] Download complete to '{full_path}'")
 
         except Exception as e:
             progress_state["should_stop"] = True  # Ensure progress reporting stops
+            print(f"[DOWNLOADER] download_url_file ERROR: {type(e).__name__}: {e}")
             yield create_status_payload(
                 db_model_id, 0, ModelDownloadStatus.FAILED, str(e)
             )
@@ -142,6 +148,7 @@ async def modal_download_file_task(
 
     try:
         downloaded_path = None
+        print(f"[DOWNLOADER] upload_type='{upload_type}' full_path='{full_path}' volume_name='{volume_name}'")
         if upload_type == "huggingface":
             async for event in download_url_file(download_url, token):
                 yield event
@@ -159,14 +166,17 @@ async def modal_download_file_task(
         else:
             raise ValueError(f"Unsupported upload_type: {upload_type}")
 
+        print(f"[DOWNLOADER] Download done. Now uploading to Modal volume '{volume_name}' at path '{full_path}'")
         volume = Volume.from_name(volume_name, create_if_missing=True)
 
         with volume.batch_upload() as batch:
+            print(f"[DOWNLOADER] batch.put_file('{downloaded_path}', '{full_path}')")
             batch.put_file(downloaded_path, full_path)
 
+        print(f"[DOWNLOADER] Volume upload complete!")
         yield create_status_payload(db_model_id, 100, ModelDownloadStatus.SUCCESS)
     except Exception as e:
-        print(f"Error in download_file_task: {str(e)}")
+        print(f"[DOWNLOADER] FATAL ERROR: {type(e).__name__}: {e}")
         yield create_status_payload(db_model_id, 0, ModelDownloadStatus.FAILED, str(e))
         raise e
 
