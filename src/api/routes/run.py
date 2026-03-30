@@ -834,6 +834,42 @@ async def retry_post_request(
             raise
 
 
+
+def sanitize_workflow_seeds(workflow_api: Dict[str, Any]):
+    """
+    Sanitize seed values for specific API nodes that only support 32-bit integers.
+    ComfyUI's random seeds are often 64-bit, causing validation errors.
+    """
+    problematic_node_types = [
+        "TencentImageToModelNode",
+        "MeshyImageToModelNode", 
+        "MeshyTextToModelNode",
+        "ViduImageToVideoNode",
+        "ViduTextToVideoNode"
+    ]
+    
+    # Max value for a 32-bit signed integer
+    MAX_32_INT = 2147483647
+    
+    if not workflow_api:
+        return
+        
+    for node_id, node in workflow_api.items():
+        class_type = node.get("class_type", "")
+        
+        # Check if the node is in our known problematic list
+        if any(pt in class_type for pt in problematic_node_types):
+            inputs = node.get("inputs", {})
+            if "seed" in inputs:
+                seed_val = inputs["seed"]
+                
+                # If seed is a large integer, clamp it using modulo
+                if isinstance(seed_val, int) and seed_val > MAX_32_INT:
+                    new_seed = seed_val % MAX_32_INT
+                    logger.info(f"[SEED SANITIZER] Clamping seed for {class_type} ({node_id}): {seed_val} -> {new_seed}")
+                    inputs["seed"] = new_seed
+
+
 async def _create_run(
     request: Request,
     data: CreateRunRequest,
@@ -1168,6 +1204,10 @@ async def _create_run(
             # backward compatibility for old comfyui custom nodes
             # Clone workflow_api_raw to modify inputs without affecting original
             workflow_api = json.loads(json.dumps(workflow_api_raw))
+
+            # [SANITIZER] Ensure specific API nodes respect 32-bit seed limits
+            sanitize_workflow_seeds(workflow_api_raw)
+            sanitize_workflow_seeds(workflow_api)
 
             if inputs and workflow_api:
                 for key in inputs:
